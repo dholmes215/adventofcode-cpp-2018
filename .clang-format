@@ -1,3 +1,5 @@
 BasedOnStyle: LLVM
-BreakBeforeBraces: Stroustrup
+AccessModifierOffset: '-4'
+BreakBeforeBraces: Mozilla
 IndentWidth: '4'
+PointerAlignment: Middle

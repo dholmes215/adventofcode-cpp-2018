@@ -17,7 +17,7 @@ int main(int /*argc*/, char ** /*argv*/)
         }
         bool containsTwo = false;
         bool containsThree = false;
-        for (auto &charCountPair : charCounts) {
+        for (auto & charCountPair : charCounts) {
             containsTwo |= charCountPair.second == 2;
             containsThree |= charCountPair.second == 3;
         }

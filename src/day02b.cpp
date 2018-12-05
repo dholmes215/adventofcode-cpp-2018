@@ -14,8 +14,8 @@ int main(int /*argc*/, char ** /*argv*/)
         lines.emplace_back(std::move(line));
     }
 
-    for (auto &id1 : lines) {
-        for (auto &id2 : lines) {
+    for (auto & id1 : lines) {
+        for (auto & id2 : lines) {
             int differingCharacters = 0;
             for (std::size_t i = 0; i < id1.size(); i++) {
                 if (id1[i] != id2[i]) {
