@@ -3,7 +3,7 @@ dist: xenial
 language: cpp
 
 compiler:
-  - gcc
+  # - gcc
   - clang
 
 addons:
@@ -22,9 +22,9 @@ before_script:
   - cmake ..
 
 script:
-  - sudo ln -s /usr/bin/gcc-8 /usr/local/bin/gcc
-  - sudo ln -s /usr/bin/g++-8 /usr/local/bin/g++
-  - g++ --version
+  # - sudo ln -s /usr/bin/gcc-8 /usr/local/bin/gcc
+  # - sudo ln -s /usr/bin/g++-8 /usr/local/bin/g++
+  # - g++ --version
   - make VERBOSE=1
   - cd ..
   - ./run-clang-format.py -r src
