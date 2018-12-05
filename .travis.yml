@@ -1,0 +1,26 @@
+dist: xenial
+
+language: cpp
+
+compiler:
+  - gcc
+  - clang
+
+addons:
+  apt:
+    sources:
+      - sourceline: "ppa:ubuntu-toolchain-r/test"
+    packages:
+      - clang-5.0
+      - clang-format-5.0
+      - g++-7
+
+before_script:
+  - mkdir build
+  - cd build
+  - cmake ..
+
+script:
+ - make VERBOSE=1
+ - cd ..
+ - ./run-clang-format.py -r src
