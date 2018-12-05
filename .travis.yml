@@ -3,8 +3,7 @@ dist: xenial
 language: cpp
 
 compiler:
-# GCC 7.3.0 works locally, but I can't get Travis's old stuff to work.
-#  - gcc
+  - gcc
   - clang
 
 addons:
@@ -23,9 +22,9 @@ before_script:
   - cmake ..
 
 script:
-#  - sudo ln -s /usr/bin/gcc-7 /usr/local/bin/gcc
-#  - sudo ln -s /usr/bin/g++-7 /usr/local/bin/g++
-#  - g++ --version
+  - sudo ln -s /usr/bin/gcc-8 /usr/local/bin/gcc
+  - sudo ln -s /usr/bin/g++-8 /usr/local/bin/g++
+  - g++ --version
   - make VERBOSE=1
   - cd ..
   - ./run-clang-format.py -r src
