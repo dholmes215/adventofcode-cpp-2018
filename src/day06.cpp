@@ -147,8 +147,8 @@ void PrintSafeRegionMap(const SafeRegionMap & safeRegionMap,
 
 int main(int /*argc*/, char ** /*argv*/)
 {
-    std::cout << "PROTIP: For best results, run with something like:\n $ day05 "
-                 "< day05input.txt | less -RS -#20\n";
+    std::cout << "PROTIP: For best results, run with something like:\n $ day06 "
+                 "< day06input.txt | less -RS -#20\n";
 
     std::string line;
     CoordinateMap coordMap;
