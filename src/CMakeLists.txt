@@ -130,3 +130,13 @@ set_target_properties(day11
 # clang-tidy is producing false-positives for this one
 #    CXX_CLANG_TIDY "clang-tidy;-warnings-as-errors=*"
   )
+
+add_executable(day12 day12.cpp)
+
+set_target_properties(day12
+  PROPERTIES
+    CXX_STANDARD 17
+    CXX_EXTENSIONS OFF
+    CXX_STANARD_REQUIRED ON
+    CXX_CLANG_TIDY "clang-tidy;-warnings-as-errors=*"
+  )
