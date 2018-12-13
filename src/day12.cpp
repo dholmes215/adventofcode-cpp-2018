@@ -8,12 +8,16 @@
 #include <string_view>
 #include <utility>
 
-using PlantIndex = std::int32_t;
-using Generation = std::uint16_t;
+using PlantIndex = std::int64_t;
+using Generation = std::uint64_t;
 using FivePlants = std::uint8_t;
 
-const std::int32_t maxPlants = 512;
+const std::int32_t maxPlants = 1024;
 const PlantIndex plantZeroIndex = maxPlants / 2;
+
+using PlantBitset = std::bitset<maxPlants>;
+
+const auto lastGeneration = 200;
 
 class PlantCollection
 {
@@ -33,8 +37,26 @@ public:
         return out;
     }
 
+    PlantIndex FindFirst() const
+    {
+        for (PlantIndex i = min; i < max; i++) {
+            if (Get(i)) {
+                return i;
+            }
+        }
+        return max;
+    }
+
+    std::pair<PlantBitset, PlantIndex> GetBits() const
+    {
+        auto firstPlant = FindFirst();
+        auto firstBit = firstPlant + plantZeroIndex;
+        auto shifted = plants >> firstBit;
+        return {shifted, firstPlant};
+    }
+
 private:
-    std::bitset<maxPlants> plants;
+    PlantBitset plants;
 };
 
 void WritePlantCollectionRange(std::ostream & stream,
@@ -153,15 +175,72 @@ void PrintNoteSet(std::ostream & stream, const NoteSet & noteSet)
     }
 }
 
-std::uint32_t PlantNumberSum(const PlantCollection & plants)
+std::int64_t PlantNumberSum(const PlantCollection & plants)
 {
-    std::uint32_t sum = 0;
-    for (PlantIndex i = PlantCollection::min; i <= PlantCollection::max; i++) {
+    std::int64_t sum = 0;
+    for (PlantIndex i = PlantCollection::min; i < PlantCollection::max; i++) {
         if (plants.Get(i)) {
             sum += i;
         }
     }
     return sum;
+}
+
+std::int64_t PlantNumberSum(const PlantBitset & bitset, PlantIndex first)
+{
+    std::int64_t sum = 0;
+    for (std::int64_t i = 0; i < static_cast<std::int64_t>(bitset.size());
+         i++) {
+        PlantIndex plantNumber = i + first;
+        if (bitset[i]) {
+            sum += plantNumber;
+        }
+    }
+    return sum;
+}
+
+void PartTwo(std::array<PlantCollection, lastGeneration + 1> & plantGenerations)
+{
+
+    std::array<std::pair<PlantBitset, PlantIndex>, lastGeneration + 1>
+        plantGenerationBitsets;
+
+    for (Generation gen = 0; gen <= lastGeneration; gen++) {
+        plantGenerationBitsets[gen] = plantGenerations[gen].GetBits();
+    }
+
+    // Find the first repeat.
+    auto repeatStartGen = -1;
+    // auto lastOriginalGen = -1;
+    auto repeatFactor = -1;
+    auto repeatShift = 0;
+    for (Generation gen = 1; gen <= lastGeneration; gen++) {
+        auto & [bits, first] = plantGenerationBitsets[gen];
+        for (Generation prevGen = 0; prevGen < gen; prevGen++) {
+            auto & [prevBits, prevFirst] = plantGenerationBitsets[prevGen];
+            if (bits == prevBits) {
+                std::cout << "Generation " << gen << " is a repeat of "
+                          << prevGen << ".\n";
+                repeatStartGen = prevGen;
+                repeatFactor = gen - prevGen;
+                repeatShift = first - prevFirst;
+
+                auto targetGen = 50000000000LL;
+                auto targetGenAdjusted = targetGen - repeatStartGen;
+                auto repeatCount = targetGenAdjusted / repeatFactor;
+                auto targetShift = repeatShift * repeatCount;
+
+                std::cout << "Sum of plant numbers at generation #" << targetGen
+                          << ": "
+                          << PlantNumberSum(bits, first + targetShift - 1)
+                          << '\n';
+
+                return;
+            }
+        }
+    }
+
+    std::cout << "No repeats found!\n";
 }
 
 int main(int /*argc*/, char ** /*argv*/)
@@ -187,8 +266,6 @@ int main(int /*argc*/, char ** /*argv*/)
     std::cout << "Notes:\n";
     PrintNoteSet(std::cout, noteSet);
 
-    const auto lastGeneration = 50;
-
     std::array<PlantCollection, lastGeneration + 1> plantGenerations;
     plantGenerations[0] = initialState;
     for (Generation gen = 1; gen <= lastGeneration; gen++) {
@@ -203,6 +280,8 @@ int main(int /*argc*/, char ** /*argv*/)
 
     std::cout << "Sum of plant numbers at generation #20: "
               << PlantNumberSum(plantGenerations[20]) << '\n';
+
+    PartTwo(plantGenerations);
 
     return 0;
 }
