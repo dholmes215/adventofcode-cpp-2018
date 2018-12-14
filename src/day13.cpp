@@ -17,6 +17,9 @@
 
 using namespace std::chrono_literals;
 
+using ansi::cursor;
+using ansi::graphic;
+
 using std::array;
 using std::optional;
 using std::pair;
@@ -25,7 +28,7 @@ using std::uint16_t;
 using std::uint8_t;
 using std::vector;
 
-const auto TrackSize = 50;
+const auto TrackSize = 150;
 const auto TrackWidth = TrackSize;
 const auto TrackHeight = TrackSize;
 
@@ -43,9 +46,7 @@ using TrackTile = std::bitset<4>;
 using TrackRow = array<TrackTile, TrackWidth>;
 using Track = array<TrackRow, TrackHeight>;
 using CartId = uint8_t;
-using Cart = pair<Coordinate, Direction>;
-using CartWithId = pair<CartId, Cart>;
-using MaybeCart = optional<Cart>;
+using MaybeCart = optional<pair<Coordinate, Direction>>;
 using ErrorString = std::string;
 
 using InputChars = array<array<char, TrackWidth>, TrackHeight>;
@@ -119,27 +120,142 @@ std::ostream & operator<<(std::ostream & stream, const Direction & direction)
     return stream;
 }
 
+class Cart
+{
+
+public:
+    Cart(CartId id, Coordinate coordinates, Direction direction)
+        : id(id), coordinates(coordinates), direction(direction),
+          nextDecision(TurnDecision::Left)
+    {}
+
+    CartId GetId() const { return id; }
+    Coordinate GetCoordinates() const { return coordinates; }
+    Direction GetDirection() const { return direction; }
+
+    void Move()
+    {
+        auto & [x, y] = coordinates;
+        if (direction == Direction::North) {
+            y--;
+        } else if (direction == Direction::South) {
+            y++;
+        } else if (direction == Direction::West) {
+            x--;
+        } else if (direction == Direction::East) {
+            x++;
+        }
+    }
+
+    void Turn(TrackTile tile)
+    {
+        if (tile == TrackTile(North | South) ||
+            tile == TrackTile(East | West)) {
+            return;
+        } else if (tile == TrackTile(North | East)) {
+            if (direction == South) {
+                direction = East;
+            } else if (direction == West) {
+                direction = North;
+            }
+            // TODO bad
+        } else if (tile == TrackTile(South | West)) {
+            if (direction == North) {
+                direction = West;
+            } else if (direction == East) {
+                direction = South;
+            }
+            // TODO bad
+        } else if (tile == TrackTile(North | West)) {
+            if (direction == South) {
+                direction = West;
+            } else if (direction == East) {
+                direction = North;
+            }
+            // TODO bad
+        } else if (tile == TrackTile(South | East)) {
+            if (direction == North) {
+                direction = East;
+            } else if (direction == West) {
+                direction = South;
+            }
+            // TODO bad
+        } else if (tile == TrackTile(North | South | West | East)) {
+            direction = NewDirection(direction, nextDecision);
+            nextDecision = NextTurnDecision(nextDecision);
+        }
+    }
+
+private:
+    enum class TurnDecision : uint8_t
+    {
+        Left = 0,
+        Straight = 1,
+        Right = 2,
+    };
+
+    static TurnDecision NextTurnDecision(TurnDecision oldDecision)
+    {
+        return static_cast<TurnDecision>(
+            (static_cast<uint8_t>(oldDecision) + 1) % 3);
+    }
+
+    static Direction NewDirection(Direction oldDirection,
+                                  TurnDecision turnDecision)
+    {
+        if (turnDecision == TurnDecision::Straight) {
+            return oldDirection;
+        } else if (turnDecision == TurnDecision::Left) {
+            if (oldDirection == North) {
+                return West;
+            } else if (oldDirection == West) {
+                return South;
+            } else if (oldDirection == South) {
+                return East;
+            } else if (oldDirection == East) {
+                return North;
+            }
+        } else if (turnDecision == TurnDecision::Right) {
+            if (oldDirection == North) {
+                return East;
+            } else if (oldDirection == East) {
+                return South;
+            } else if (oldDirection == South) {
+                return West;
+            } else if (oldDirection == West) {
+                return North;
+            }
+        }
+        assert(false);
+    }
+
+    CartId id;
+    Coordinate coordinates;
+    Direction direction;
+    TurnDecision nextDecision;
+};
+
 // Stream insertion operator for Cart.
 std::ostream & operator<<(std::ostream & stream, const Cart & cart)
 {
-    auto [coord, dir] = cart;
-    stream << coord << ',' << dir;
+    stream << cart.GetCoordinates() << ',' << cart.GetDirection();
     return stream;
 }
 
 InputChars ReadFile(std::istream & stream)
 {
     InputChars out;
+    string line;
     for (auto & row : out) {
-        if (!stream.getline(row.data(), row.size())) {
-            break;
-        }
+        std::fill(row.begin(), row.end(), ' ');
+        std::getline(stream, line);
+        std::copy(line.begin(), line.end(), row.begin());
     }
     return out;
 }
 
-pair<TrackTile, optional<Cart>> ProcessInputTile(const InputChars & input,
-                                                 uint8_t x, uint8_t y)
+pair<TrackTile, MaybeCart> ProcessInputTile(const InputChars & input, uint8_t x,
+                                            uint8_t y)
 {
     Coordinate coordinate = {x, y};
     char tileChar = input[y][x];
@@ -203,115 +319,159 @@ pair<TrackTile, optional<Cart>> ProcessInputTile(const InputChars & input,
     std::exit(-1);
 }
 
-pair<Track, vector<CartWithId>> ProcessInput(const InputChars & input)
+pair<Track, vector<Cart>> ProcessInput(const InputChars & input)
 {
     Track track;
     CartId cartId = 0;
-    vector<CartWithId> carts;
+    vector<Cart> carts;
     for (auto y = 0; y < TrackHeight; y++) {
         for (auto x = 0; x < TrackWidth; x++) {
             auto [tile, maybeCart] = ProcessInputTile(input, x, y);
             track[y][x] = tile;
             if (maybeCart) {
-                carts.emplace_back(cartId++, *maybeCart);
+                auto [coord, dir] = *maybeCart;
+                carts.emplace_back(cartId++, coord, dir);
             }
         }
     }
     return {track, carts};
 }
 
-pair<Track, vector<CartWithId>> ReadInput(std::istream & stream)
+pair<Track, vector<Cart>> ReadInput(std::istream & stream)
 {
     return ProcessInput(ReadFile(stream));
 }
 
-void PrintTrack(std::ostream & stream, const Track & track)
+struct View
 {
-    for (auto & row : track) {
-        stream << row << '\n';
+    View() = default;
+    bool Contains(const Coordinate & coord) const
+    {
+        auto [x1, y1] = coord;
+        return (x1 >= x) && (x1 < (x + width)) && (y1 >= y) &&
+               (y1 < (y + height));
+    }
+    int16_t x;
+    int16_t y;
+    int16_t width;
+    int16_t height;
+};
+
+void PrintTrack(std::ostream & stream, const View & view, const Track & track)
+{
+    int16_t trackSize = track.size();
+    int16_t rowSize = track[0].size();
+    for (int16_t y = view.y; y < view.y + view.height; y++) {
+        if (y < 0 || y >= trackSize) {
+            stream << '\n';
+        } else {
+            auto & row = track[y];
+            for (int16_t x = view.x; x < view.x + view.width; x++) {
+                if (x < 0 || x >= rowSize) {
+                    stream << ' ';
+                } else {
+                    stream << row[x];
+                }
+            }
+        }
+        stream << '\n';
     }
 }
 
-ansi::graphic::color3 CartIdToColor(CartId id)
+void DrawTrack(std::ostream & stream, const View & view, const Track & track)
+{
+    PrintTrack(stream, view, track);
+    stream << cursor(cursor::direction::up, TrackSize);
+}
+
+graphic::color3 CartIdToColor(CartId id)
 {
     if (id < 7) {
-        return static_cast<ansi::graphic::color3>(id + 31);
+        return static_cast<graphic::color3>(id + 31);
     }
-    return ansi::graphic::color3::white;
+    return graphic::color3::white;
 }
 
-void DrawCart(std::ostream & stream, const CartWithId & cartWithId)
+void DrawCart(std::ostream & stream, const View & view, const Cart & cart)
 {
-    using ansi::cursor;
-    using ansi::graphic;
-    auto [id, cart] = cartWithId;
-    auto [coord, dir] = cart;
-    auto [x, y] = coord;
-    if (y > 0) {
-        stream << cursor(cursor::direction::down, y);
-    }
-    if (x > 0) {
-        stream << cursor(cursor::direction::right, x);
-    }
-    stream << graphic::fg_color(CartIdToColor(id));
-    stream << dir;
-    stream << graphic::reset();
-    stream << cursor(cursor::direction::left, x + 1);
-    if (y > 0) {
-        stream << cursor(cursor::direction::up, y);
+    if (view.Contains(cart.GetCoordinates())) {
+        auto [x, y] = cart.GetCoordinates();
+        if (y > 0) {
+            stream << cursor(cursor::direction::down, y);
+        }
+        if (x > 0) {
+            stream << cursor(cursor::direction::right, x);
+        }
+        stream << graphic::fg_color(CartIdToColor(cart.GetId()));
+        stream << cart.GetDirection();
+        stream << graphic::reset();
+        stream << cursor(cursor::direction::left, x + 1);
+        if (y > 0) {
+            stream << cursor(cursor::direction::up, y);
+        }
     }
 }
 
-void DrawCarts(std::ostream & stream, const vector<CartWithId> & cartsWithIds)
+void DrawCarts(std::ostream & stream, const View & view,
+               const vector<Cart> & carts)
 {
-    for (auto & cartWithId : cartsWithIds) {
-        DrawCart(stream, cartWithId);
+    for (auto & cart : carts) {
+        DrawCart(stream, view, cart);
     }
     stream.flush();
 }
 
-void SortCarts(vector<CartWithId> & cartsWithIds)
+void SortCarts(vector<Cart> & carts)
 {
-    std::sort(cartsWithIds.begin(), cartsWithIds.end(),
-              [](auto & cart1, auto & cart2) {
-                  auto [x1, y1] = cart1.second;
-                  auto [x2, y2] = cart2.second;
-                  return std::tie(y1, x1) < std::tie(y2, x2);
-              });
+    std::sort(carts.begin(), carts.end(), [](auto & cart1, auto & cart2) {
+        auto [x1, y1] = cart1.GetCoordinates();
+        auto [x2, y2] = cart2.GetCoordinates();
+        return std::tie(y1, x1) < std::tie(y2, x2);
+    });
 }
 
-using Crashed = bool;
-Crashed SortAndMoveCarts(const Track & track, vector<CartWithId> & cartsWithIds)
+void MoveCarts(vector<Cart> & carts)
 {
-    SortCarts(cartsWithIds);
-
-    for (auto & cartWithId : cartsWithIds) {
-        auto [id, cart] = cartWithId;
-        auto [coord, direction] = cart;
+    for (auto & cart : carts) {
+        cart.Move();
     }
+}
 
-    return false;
+void TurnCarts(const Track & track, vector<Cart> & carts)
+{
+    for (auto & cart : carts) {
+        auto [x, y] = cart.GetCoordinates();
+        cart.Turn(track[y][x]);
+    }
 }
 
 int main(int /*argc*/, char ** /*argv*/)
 {
-    using ansi::cursor;
-    auto [track, cartsWithIds] = ReadInput(std::cin);
+    auto [track, carts] = ReadInput(std::cin);
 
-    for (CartWithId cartWithId : cartsWithIds) {
-        auto [id, cart] = cartWithId;
+    for (Cart & cart : carts) {
         std::cout << cart << '\n';
     }
 
-    PrintTrack(std::cout, track);
-    std::cout << cursor(cursor::direction::up, TrackSize);
+    const View view = {0, 0, 150, 48};
 
-    DrawCarts(std::cout, cartsWithIds);
+    DrawTrack(std::cout, view, track);
+    DrawCarts(std::cout, view, carts);
 
     bool crashed = false;
     while (!crashed) {
-        SortAndMoveCarts(cartsWithIds);
-        DrawCarts(std::cout, cartsWithIds);
+        SortCarts(carts);
+        MoveCarts(carts);
+
+        DrawTrack(std::cout, view, track);
+        DrawCarts(std::cout, view, carts);
+        std::this_thread::sleep_for(10ms);
+
+        TurnCarts(track, carts);
+
+        DrawTrack(std::cout, view, track);
+        DrawCarts(std::cout, view, carts);
+        std::this_thread::sleep_for(10ms);
     }
 
     std::cout << cursor(cursor::direction::down, TrackSize);
