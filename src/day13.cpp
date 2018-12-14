@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -41,36 +42,36 @@ enum Direction : std::uint8_t
 };
 
 using Directions = uint8_t;
-using Coordinate = pair<uint8_t, uint8_t>;
+using Coordinate = pair<int16_t, int16_t>;
 using TrackTile = std::bitset<4>;
 using TrackRow = array<TrackTile, TrackWidth>;
 using Track = array<TrackRow, TrackHeight>;
-using CartId = uint8_t;
+using CartId = uint16_t;
 using MaybeCart = optional<pair<Coordinate, Direction>>;
 using ErrorString = std::string;
 
 using InputChars = array<array<char, TrackWidth>, TrackHeight>;
 
-char TrackTileToChar(const TrackTile tile)
+std::string_view TrackTileToString(const TrackTile tile)
 {
     if (tile == TrackTile()) {
-        return ' ';
+        return " ";
     } else if (tile == TrackTile(North | South)) {
-        return '|';
+        return "│";
     } else if (tile == TrackTile(East | West)) {
-        return '-';
+        return "─";
     } else if (tile == TrackTile(North | West)) {
-        return '/';
+        return "╯";
     } else if (tile == TrackTile(South | East)) {
-        return '/';
+        return "╭";
     } else if (tile == TrackTile(North | East)) {
-        return '\\';
+        return "╰";
     } else if (tile == TrackTile(South | West)) {
-        return '\\';
+        return "╮";
     } else if (tile == TrackTile(North | South | East | West)) {
-        return '+';
+        return "┼";
     }
-    return 'X';
+    return " ";
 }
 
 // Stream insertion operator for Coordinate.
@@ -84,7 +85,7 @@ std::ostream & operator<<(std::ostream & stream, const Coordinate & coord)
 // Stream insertion operator for TrackTile.
 std::ostream & operator<<(std::ostream & stream, const TrackTile & tile)
 {
-    stream << TrackTileToChar(tile);
+    stream << TrackTileToString(tile);
     return stream;
 }
 
@@ -381,7 +382,7 @@ void PrintTrack(std::ostream & stream, const View & view, const Track & track)
 void DrawTrack(std::ostream & stream, const View & view, const Track & track)
 {
     PrintTrack(stream, view, track);
-    stream << cursor(cursor::direction::up, TrackSize);
+    stream << cursor(cursor::direction::up, view.height);
 }
 
 graphic::color3 CartIdToColor(CartId id)
@@ -396,18 +397,21 @@ void DrawCart(std::ostream & stream, const View & view, const Cart & cart)
 {
     if (view.Contains(cart.GetCoordinates())) {
         auto [x, y] = cart.GetCoordinates();
-        if (y > 0) {
-            stream << cursor(cursor::direction::down, y);
+        uint16_t shiftedX = x - view.x;
+        uint16_t shiftedY = y - view.y;
+        if (shiftedY > 0) {
+            stream << cursor(cursor::direction::down, shiftedY);
         }
-        if (x > 0) {
-            stream << cursor(cursor::direction::right, x);
+        if (shiftedX > 0) {
+            stream << cursor(cursor::direction::right, shiftedX);
         }
+
         stream << graphic::fg_color(CartIdToColor(cart.GetId()));
         stream << cart.GetDirection();
         stream << graphic::reset();
-        stream << cursor(cursor::direction::left, x + 1);
-        if (y > 0) {
-            stream << cursor(cursor::direction::up, y);
+        stream << cursor(cursor::direction::left, shiftedX + 1);
+        if (shiftedY > 0) {
+            stream << cursor(cursor::direction::up, shiftedY);
         }
     }
 }
@@ -430,11 +434,35 @@ void SortCarts(vector<Cart> & carts)
     });
 }
 
-void MoveCarts(vector<Cart> & carts)
+using Crash = pair<pair<CartId, CartId>, Coordinate>;
+vector<Crash> MoveCarts(vector<Cart> & carts)
 {
+    vector<Crash> crashes;
+    std::set<CartId> newCrashedCartIds;
+
+    auto hasCartCrashed = [&](auto & cart) {
+        return newCrashedCartIds.find(cart.GetId()) != newCrashedCartIds.end();
+    };
+
     for (auto & cart : carts) {
-        cart.Move();
+        if (!hasCartCrashed(cart)) {
+            cart.Move();
+            auto coord = cart.GetCoordinates();
+            for (auto & cart2 : carts) {
+                if ((cart.GetId() != cart2.GetId()) &&
+                    (coord == cart2.GetCoordinates())) {
+                    crashes.push_back({{cart.GetId(), cart2.GetId()}, coord});
+
+                    newCrashedCartIds.insert(cart.GetId());
+                    newCrashedCartIds.insert(cart2.GetId());
+                }
+            }
+        }
     }
+    // Remove all crashed carts.
+    carts.erase(std::remove_if(carts.begin(), carts.end(), hasCartCrashed),
+                carts.end());
+    return crashes;
 }
 
 void TurnCarts(const Track & track, vector<Cart> & carts)
@@ -449,19 +477,18 @@ int main(int /*argc*/, char ** /*argv*/)
 {
     auto [track, carts] = ReadInput(std::cin);
 
-    for (Cart & cart : carts) {
-        std::cout << cart << '\n';
-    }
-
-    const View view = {0, 0, 150, 48};
+    const View view = {0, 50, 150, 50};
 
     DrawTrack(std::cout, view, track);
     DrawCarts(std::cout, view, carts);
 
-    bool crashed = false;
-    while (!crashed) {
+    vector<Crash> crashes;
+    while (carts.size() > 1) {
         SortCarts(carts);
-        MoveCarts(carts);
+        vector<Crash> newCrashes = MoveCarts(carts);
+        for (auto & crash : newCrashes) {
+            crashes.push_back(crash);
+        }
 
         DrawTrack(std::cout, view, track);
         DrawCarts(std::cout, view, carts);
@@ -475,6 +502,15 @@ int main(int /*argc*/, char ** /*argv*/)
     }
 
     std::cout << cursor(cursor::direction::down, TrackSize);
+
+    for (auto & crash : crashes) {
+        auto [crashedCarts, coords] = crash;
+        auto [cart1, cart2] = crashedCarts;
+        std::cout << "Carts " << cart1 << " and " << cart2 << " crashed at "
+                  << coords << ".\n";
+    }
+
+    std::cout << "Remaining cart: " << carts[0] << '\n';
 
     return 0;
 }
