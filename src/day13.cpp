@@ -1,5 +1,8 @@
 // Copyright (C) 2018 David Holmes <dholmes@dholmes.us>. All rights reserved.
 
+#include "ansiterm.hpp"
+
+#include <algorithm>
 #include <array>
 #include <bitset>
 #include <cassert>
@@ -39,7 +42,9 @@ using Coordinate = pair<uint8_t, uint8_t>;
 using TrackTile = std::bitset<4>;
 using TrackRow = array<TrackTile, TrackWidth>;
 using Track = array<TrackRow, TrackHeight>;
+using CartId = uint8_t;
 using Cart = pair<Coordinate, Direction>;
+using CartWithId = pair<CartId, Cart>;
 using MaybeCart = optional<Cart>;
 using ErrorString = std::string;
 
@@ -198,23 +203,24 @@ pair<TrackTile, optional<Cart>> ProcessInputTile(const InputChars & input,
     std::exit(-1);
 }
 
-pair<Track, vector<Cart>> ProcessInput(const InputChars & input)
+pair<Track, vector<CartWithId>> ProcessInput(const InputChars & input)
 {
     Track track;
-    vector<Cart> carts;
+    CartId cartId = 0;
+    vector<CartWithId> carts;
     for (auto y = 0; y < TrackHeight; y++) {
         for (auto x = 0; x < TrackWidth; x++) {
             auto [tile, maybeCart] = ProcessInputTile(input, x, y);
             track[y][x] = tile;
             if (maybeCart) {
-                carts.push_back(*maybeCart);
+                carts.emplace_back(cartId++, *maybeCart);
             }
         }
     }
     return {track, carts};
 }
 
-pair<Track, vector<Cart>> ReadInput(std::istream & stream)
+pair<Track, vector<CartWithId>> ReadInput(std::istream & stream)
 {
     return ProcessInput(ReadFile(stream));
 }
@@ -226,75 +232,89 @@ void PrintTrack(std::ostream & stream, const Track & track)
     }
 }
 
-class MoveCursor
+ansi::graphic::color3 CartIdToColor(CartId id)
 {
-    friend std::ostream & operator<<(std::ostream & stream,
-                                     const MoveCursor & moveCursor);
-
-public:
-    MoveCursor(Direction direction, uint16_t spaces)
-        : direction(direction), spaces(spaces)
-    {}
-
-private:
-    Direction direction;
-    uint16_t spaces;
-};
-
-std::ostream & operator<<(std::ostream & stream, const MoveCursor & moveCursor)
-{
-    char dirChar = 'A';
-    if (moveCursor.direction == North) {
-        dirChar = 'A';
-    } else if (moveCursor.direction == South) {
-        dirChar = 'B';
-    } else if (moveCursor.direction == East) {
-        dirChar = 'C';
-    } else if (moveCursor.direction == West) {
-        dirChar = 'D';
+    if (id < 7) {
+        return static_cast<ansi::graphic::color3>(id + 31);
     }
-    stream << "\033[" << moveCursor.spaces << dirChar;
-    return stream;
+    return ansi::graphic::color3::white;
 }
 
-void DrawCart(std::ostream & stream, const Cart & cart)
+void DrawCart(std::ostream & stream, const CartWithId & cartWithId)
 {
+    using ansi::cursor;
+    using ansi::graphic;
+    auto [id, cart] = cartWithId;
     auto [coord, dir] = cart;
     auto [x, y] = coord;
     if (y > 0) {
-        stream << MoveCursor(South, y);
+        stream << cursor(cursor::direction::down, y);
     }
     if (x > 0) {
-        stream << MoveCursor(East, x);
+        stream << cursor(cursor::direction::right, x);
     }
-    stream << dir << MoveCursor(West, x + 1);
+    stream << graphic::fg_color(CartIdToColor(id));
+    stream << dir;
+    stream << graphic::reset();
+    stream << cursor(cursor::direction::left, x + 1);
     if (y > 0) {
-        stream << MoveCursor(North, y);
+        stream << cursor(cursor::direction::up, y);
     }
 }
 
-void DrawCarts(std::ostream & stream, const vector<Cart> & carts)
+void DrawCarts(std::ostream & stream, const vector<CartWithId> & cartsWithIds)
 {
-    for (auto & cart : carts) {
-        DrawCart(stream, cart);
+    for (auto & cartWithId : cartsWithIds) {
+        DrawCart(stream, cartWithId);
     }
     stream.flush();
 }
 
+void SortCarts(vector<CartWithId> & cartsWithIds)
+{
+    std::sort(cartsWithIds.begin(), cartsWithIds.end(),
+              [](auto & cart1, auto & cart2) {
+                  auto [x1, y1] = cart1.second;
+                  auto [x2, y2] = cart2.second;
+                  return std::tie(y1, x1) < std::tie(y2, x2);
+              });
+}
+
+using Crashed = bool;
+Crashed SortAndMoveCarts(const Track & track, vector<CartWithId> & cartsWithIds)
+{
+    SortCarts(cartsWithIds);
+
+    for (auto & cartWithId : cartsWithIds) {
+        auto [id, cart] = cartWithId;
+        auto [coord, direction] = cart;
+    }
+
+    return false;
+}
+
 int main(int /*argc*/, char ** /*argv*/)
 {
-    auto [track, carts] = ReadInput(std::cin);
+    using ansi::cursor;
+    auto [track, cartsWithIds] = ReadInput(std::cin);
 
-    for (Cart cart : carts) {
+    for (CartWithId cartWithId : cartsWithIds) {
+        auto [id, cart] = cartWithId;
         std::cout << cart << '\n';
     }
 
     PrintTrack(std::cout, track);
-    std::cout << MoveCursor(North, TrackSize);
+    std::cout << cursor(cursor::direction::up, TrackSize);
 
-    DrawCarts(std::cout, carts);
+    DrawCarts(std::cout, cartsWithIds);
 
-    std::cout << MoveCursor(South, TrackSize);
+    bool crashed = false;
+    while (!crashed) {
+        SortAndMoveCarts(cartsWithIds);
+        DrawCarts(std::cout, cartsWithIds);
+    }
+
+    std::cout << cursor(cursor::direction::down, TrackSize);
 
     return 0;
 }
