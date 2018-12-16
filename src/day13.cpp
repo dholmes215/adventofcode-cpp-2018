@@ -112,6 +112,7 @@ char DirectionToChar(Direction direction)
     }
 
     assert(false);
+    return ' ';
 }
 
 // Stream insertion operator for Direction.
@@ -228,6 +229,7 @@ private:
             }
         }
         assert(false);
+        return North;
     }
 
     CartId id;

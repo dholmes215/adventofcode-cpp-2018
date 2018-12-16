@@ -33,7 +33,7 @@ public:
 
 std::uint16_t submatchToInt(const std::csub_match & submatch)
 {
-    std::uint16_t i;
+    std::uint16_t i = 0;
     auto ec = std::from_chars(submatch.first, submatch.second, i).ec;
 
     // We know it's valid because it matched our regex.
