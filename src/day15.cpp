@@ -1,5 +1,7 @@
 // Copyright (C) 2018 David Holmes <dholmes@dholmes.us>. All rights reserved.
 
+#include "day15.hpp"
+
 #include "ansiterm.hpp"
 #include "termios.hpp"
 
@@ -8,146 +10,21 @@
 #include <array>
 #include <bitset>
 #include <cstdint>
-#include <deque>
 #include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <optional>
-#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 
+using namespace day15;
+
 using namespace std::chrono_literals;
 
 using ansi::cursor;
 using ansi::cursor_position;
 using ansi::graphic;
-
-using std::array;
-using std::bitset;
-using std::deque;
-using std::optional;
-using std::pair;
-using std::set;
-using std::string;
-using std::string_view;
-using std::vector;
-
-using std::int32_t;
-using std::uint32_t;
-
-const auto MapSize = 32;
-
-using MapRow = bitset<MapSize>;
-using Map = array<MapRow, MapSize>;
-using Column = int32_t;
-using Row = int32_t;
-using EntityId = uint32_t;
-using Round = uint32_t;
-using HitPoints = int32_t;
-using AttackPower = uint32_t;
-
-template <typename Key, typename Value>
-bool Contains(const std::map<Key, Value> & m, Key key)
-{
-    return m.find(key) != m.end();
-}
-
-template <typename Key> bool Contains(const set<Key> & s, Key key)
-{
-    return s.find(key) != s.end();
-}
-
-struct Coordinates
-{
-    Coordinates(Column x, Row y) : x(x), y(y) {}
-
-    Column x;
-    Row y;
-
-    bool operator<(const Coordinates & other) const
-    {
-        return std::tie(y, x) < std::tie(other.y, other.x);
-    }
-    bool operator>(const Coordinates & other) const { return other < *this; }
-    bool operator<=(const Coordinates & other) const
-    {
-        return !(other < *this);
-    }
-    bool operator>=(const Coordinates & other) const
-    {
-        return !(other > *this);
-    }
-
-    bool operator==(const Coordinates & other) const
-    {
-        return std::tie(x, y) == std::tie(other.x, other.y);
-    }
-    bool operator!=(const Coordinates & other) const
-    {
-        return !(*this == other);
-    }
-
-    Coordinates operator+(const Coordinates & other)
-    {
-        Coordinates out = other;
-        out.x += x;
-        out.y += y;
-        return out;
-    }
-};
-
-using Path = vector<Coordinates>;
-
-enum class EntityType
-{
-    Elf,
-    Goblin,
-};
-
-// Stream insertion operator for EntityType.
-std::ostream & operator<<(std::ostream & stream, const EntityType & type)
-{
-    stream << (type == EntityType::Elf ? "Elf" : "Goblin");
-    return stream;
-}
-
-EntityType EnemyType(EntityType type)
-{
-    if (type == EntityType::Elf) {
-        return EntityType::Goblin;
-    } else {
-        return EntityType::Elf;
-    }
-}
-
-struct Entity
-{
-    Entity(EntityId id, EntityType type, Coordinates coords)
-        : id(id), type(type), coords(coords), hp(200), attackPower(3),
-          status(){};
-    EntityId id;
-    EntityType type;
-    Coordinates coords;
-    HitPoints hp;
-    AttackPower attackPower;
-    string status;
-    Path currentPath;
-};
-
-struct State
-{
-    Round round = 0;
-    EntityId activeEntity = 0;
-    EntityId targetEntity = 0;
-    std::map<EntityId, Entity> entities;
-    std::map<Coordinates, EntityId> entitiesByLocation;
-};
 
 ansi::cursor_position GetCursor()
 {
@@ -167,50 +44,6 @@ void CheckUsage(int argc, char ** argv)
         std::cerr << "USAGE: " << argv << " inputFileName.txt\n";
         std::exit(1);
     }
-}
-
-pair<Map, State> ReadInput(std::istream & stream)
-{
-    Map map;
-    State state;
-    EntityId nextEntityId = 1;
-    string line;
-    Row y = 0;
-    while (std::getline(stream, line)) {
-        if (y > MapSize) {
-            std::cerr << "Input file is too long (max = " << MapSize
-                      << " lines).\n";
-        }
-        Column lineSize = line.size();
-        if (line.size() > MapSize) {
-            std::cerr << "Input line " << y << " is too long (max = " << MapSize
-                      << " characters).\n";
-            std::exit(1);
-        }
-
-        for (Column x = 0; x < lineSize; x++) {
-            if (line[x] != '#') {
-                map[y][x] = true;
-                if (line[x] == 'G') {
-                    const auto id = nextEntityId++;
-                    const Coordinates coords = {x, y};
-                    state.entities.emplace(
-                        id, Entity(id, EntityType::Goblin, coords));
-                    state.entitiesByLocation.emplace(coords, id);
-                } else if (line[x] == 'E') {
-                    const auto id = nextEntityId++;
-                    const Coordinates coords = {x, y};
-                    state.entities.emplace(id,
-                                           Entity(id, EntityType::Elf, coords));
-                    state.entitiesByLocation.emplace(coords, id);
-                }
-            }
-        }
-
-        y++;
-    }
-
-    return {map, state};
 }
 
 pair<Map, State> ReadInput(int argc, char ** argv)
@@ -318,24 +151,6 @@ set<Coordinates> GetTargets(const State & state, EntityType targetType)
     }
     return out;
 }
-
-// Returns adjacent squares in "reading order";
-vector<Coordinates> GetAdjacentSquares(Coordinates coords)
-{
-    vector<Coordinates> out;
-
-    const Coordinates north = {0, -1};
-    const Coordinates west = {-1, 0};
-    const Coordinates east = {1, 0};
-    const Coordinates south = {0, 1};
-
-    const array<Coordinates, 4> neighbors = {north, west, east, south};
-    for (auto neighbor : neighbors) {
-        out.push_back(neighbor + coords);
-    }
-
-    return out;
-};
 
 vector<Coordinates> GetAdjacentOpenSquares(const Map & map, const State & state,
                                            Coordinates coords)
@@ -508,25 +323,6 @@ void DrawEverything(const Map & map, State & state, Display & disp)
     std::cout << std::flush;
 }
 
-optional<EntityId> SelectAdjacentTarget(const State & state, Coordinates source,
-                                        const set<Coordinates> & targets)
-{
-    optional<EntityId> attackThisTarget = {};
-    HitPoints lowestHp = std::numeric_limits<HitPoints>::max();
-    for (auto neighbor : GetAdjacentSquares(source)) {
-        if (Contains(targets, neighbor)) {
-            const EntityId enemyId = state.entitiesByLocation.at(neighbor);
-            const Entity & enemy = state.entities.at(enemyId);
-            if (enemy.hp < lowestHp) {
-                lowestHp = enemy.hp;
-                attackThisTarget = enemyId;
-            }
-            break;
-        }
-    }
-    return attackThisTarget;
-}
-
 void TakeTurns(const Map & map, State & state, Display & disp)
 {
     auto beginningOfTurnLocations = state.entitiesByLocation;
@@ -549,7 +345,7 @@ void TakeTurns(const Map & map, State & state, Display & disp)
                 entity.currentPath = *maybePath;
 
                 DrawEverything(map, state, disp);
-                std::this_thread::sleep_for(5000ms);
+                std::this_thread::sleep_for(50ms);
 
                 auto move = maybePath->at(0);
                 // Move to an adjacent tile.
@@ -558,7 +354,8 @@ void TakeTurns(const Map & map, State & state, Display & disp)
                 state.entitiesByLocation.insert({move, id});
                 entity.status = "Moving";
 
-                attackThisTarget = SelectAdjacentTarget(state, entity.coords, targets);
+                attackThisTarget =
+                    SelectAdjacentTarget(state, entity.coords, targets);
             }
         }
 
@@ -578,7 +375,7 @@ void TakeTurns(const Map & map, State & state, Display & disp)
         entity.currentPath = {};
 
         DrawEverything(map, state, disp);
-        std::this_thread::sleep_for(5000ms);
+        std::this_thread::sleep_for(50ms);
         entity.status = "";
         state.targetEntity = 0;
     }
@@ -611,7 +408,7 @@ int main(int argc, char ** argv)
         TakeTurns(map, state, disp);
 
         DrawEverything(map, state, disp);
-        std::this_thread::sleep_for(5000ms);
+        std::this_thread::sleep_for(200ms);
 
         int elfHp = CountEntityHitPoints(state, EntityType::Elf);
         int goblinHp = CountEntityHitPoints(state, EntityType::Goblin);

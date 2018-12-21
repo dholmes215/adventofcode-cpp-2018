@@ -172,3 +172,15 @@ set_target_properties(day15
 # clang-tidy is producing false-positives for this one
 #     CXX_CLANG_TIDY "clang-tidy;-warnings-as-errors=*"
   )
+
+add_executable(day15test day15test.cpp)
+
+set_target_properties(day15test
+  PROPERTIES
+    CXX_STANDARD 17
+    CXX_EXTENSIONS OFF
+    CXX_STANARD_REQUIRED ON
+    CXX_CLANG_TIDY "clang-tidy;-warnings-as-errors=*"
+  )
+
+target_link_libraries(day15test ${CONAN_LIBS})
