@@ -9,6 +9,7 @@
 
 #include <array>
 #include <bitset>
+#include <cassert>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -141,158 +142,6 @@ void DrawText(std::ostream & stream, ansi::cursor_position pos,
     stream << ansi::cup(pos) << text;
 }
 
-set<Coordinates> GetTargets(const State & state, EntityType targetType)
-{
-    set<Coordinates> out;
-    for (auto & [id, entity] : state.entities) {
-        if (entity.type == targetType && entity.hp > 0) {
-            out.insert(entity.coords);
-        }
-    }
-    return out;
-}
-
-vector<Coordinates> GetAdjacentOpenSquares(const Map & map, const State & state,
-                                           Coordinates coords)
-{
-    vector<Coordinates> out;
-
-    for (Coordinates neighbor : GetAdjacentSquares(coords)) {
-        auto [x, y] = neighbor;
-        if (!map[y][x]) {
-            continue;
-        }
-        if (!Contains(state.entitiesByLocation, neighbor)) {
-            out.push_back(neighbor);
-        }
-    }
-
-    return out;
-}
-
-set<Coordinates> GetAllOpenSquares(const Map & map, const State & state)
-{
-    set<Coordinates> out;
-    for (Row y = 0; y < MapSize; y++) {
-        for (Column x = 0; x < MapSize; x++) {
-            Coordinates coords = {x, y};
-            if (map[y][x] && !Contains(state.entitiesByLocation, coords)) {
-                out.insert(coords);
-            }
-        }
-    }
-    return out;
-}
-
-using Distance = uint32_t;
-
-struct BfsResult
-{
-    std::map<Coordinates, Distance> distances;
-    std::map<Coordinates, optional<Coordinates>> predecessors;
-};
-
-BfsResult Bfs(const Map & map, const State & state, Coordinates s)
-{
-    enum class Color
-    {
-        White,
-        Gray,
-        Black,
-    };
-
-    set<Coordinates> vertexesExcludingSource = GetAllOpenSquares(map, state);
-    set<Coordinates> vertexes = vertexesExcludingSource;
-    vertexes.insert(s);
-    std::map<Coordinates, Color> color;
-    std::map<Coordinates, Distance> d;
-    std::map<Coordinates, optional<Coordinates>> pi; // Predecessor
-    deque<Coordinates> q;
-
-    for (Coordinates u : vertexesExcludingSource) {
-        d[u] = std::numeric_limits<Distance>::max();
-        pi[u] = {};
-    }
-    color[s] = Color::Gray;
-    d[s] = 0;
-    pi[s] = {};
-    q.push_back(s);
-    while (!q.empty()) {
-        Coordinates u = q.front();
-        q.pop_front();
-        for (Coordinates v : GetAdjacentOpenSquares(map, state, u)) {
-            if (color[v] == Color::White) {
-                color[v] = Color::Gray;
-                d[v] = d[u] + 1;
-                pi[v] = u;
-                q.push_back(v);
-            }
-        }
-        color[u] = Color::Black;
-    }
-
-    BfsResult result;
-    result.distances = std::move(d);
-    result.predecessors = std::move(pi);
-    return result;
-}
-
-set<Coordinates> FindSquaresInRangeOfTargets(const Map & map,
-                                             const State & state,
-                                             const set<Coordinates> & targets)
-{
-    set<Coordinates> out;
-    for (Coordinates target : targets) {
-        for (auto neighbor : GetAdjacentOpenSquares(map, state, target)) {
-            out.insert(neighbor);
-        }
-    }
-    return out;
-}
-
-optional<Path> GetPathFromBfs(BfsResult & bfsResult, Coordinates source,
-                              Coordinates target)
-{
-    if (!bfsResult.predecessors.at(target)) {
-        return {};
-    }
-    Path path;
-    while (target != source) {
-        path.push_back(target);
-        target = *bfsResult.predecessors.at(target);
-    }
-    std::reverse(path.begin(), path.end());
-    return path;
-}
-
-// Returns either the adjacent square we should move onto to reach the nearest
-// target, or {} if there are no paths to targets.
-optional<Path> SearchForTarget(const Map & map, const State & state,
-                               Coordinates source,
-                               const set<Coordinates> & targets)
-{
-    BfsResult bfsResult = Bfs(map, state, source);
-
-    // Set will automatically be ordered in "reading order", so the first of
-    // each distance we find will be the priority.
-    set<Coordinates> squaresInRangeOfTargets =
-        FindSquaresInRangeOfTargets(map, state, targets);
-    if (squaresInRangeOfTargets.empty()) {
-        return {};
-    }
-    Coordinates nearestDest = *squaresInRangeOfTargets.begin();
-    Distance shortestDistance = bfsResult.distances[nearestDest];
-    for (Coordinates dest : squaresInRangeOfTargets) {
-        Distance distance = bfsResult.distances[dest];
-        if (distance < shortestDistance) {
-            shortestDistance = distance;
-            nearestDest = dest;
-        }
-    }
-
-    return GetPathFromBfs(bfsResult, source, nearestDest);
-}
-
 void DrawAllEntityStats(std::ostream & stream, cursor_position pos,
                         const State & state)
 {
@@ -323,12 +172,34 @@ void DrawEverything(const Map & map, State & state, Display & disp)
     std::cout << std::flush;
 }
 
+int CountEntityHitPoints(const State & state, EntityType type)
+{
+    int out = 0;
+    for (auto & [id, entity] : state.entities) {
+        if (entity.type == type) {
+            out += entity.hp;
+        }
+    }
+    return out;
+}
+
 void TakeTurns(const Map & map, State & state, Display & disp)
 {
-    auto beginningOfTurnLocations = state.entitiesByLocation;
+    const auto beginningOfTurnLocations = state.entitiesByLocation;
+    vector<EntityId> turnOrder;
     for (auto & [coord, id] : beginningOfTurnLocations) {
+        turnOrder.push_back(id);
+    }
+
+    for (auto id : turnOrder) {
+        
         state.activeEntity = id;
         auto & entity = state.entities.at(id);
+        if (entity.hp <= 0) {
+            continue;
+        }
+
+        auto coord = entity.coords;
 
         set<Coordinates> targets = GetTargets(state, EnemyType(entity.type));
 
@@ -345,7 +216,7 @@ void TakeTurns(const Map & map, State & state, Display & disp)
                 entity.currentPath = *maybePath;
 
                 DrawEverything(map, state, disp);
-                std::this_thread::sleep_for(50ms);
+                std::this_thread::sleep_for(20ms);
 
                 auto move = maybePath->at(0);
                 // Move to an adjacent tile.
@@ -375,22 +246,19 @@ void TakeTurns(const Map & map, State & state, Display & disp)
         entity.currentPath = {};
 
         DrawEverything(map, state, disp);
-        std::this_thread::sleep_for(50ms);
+        std::this_thread::sleep_for(20ms);
         entity.status = "";
         state.targetEntity = 0;
     }
     state.activeEntity = 0;
-}
 
-int CountEntityHitPoints(const State & state, EntityType type)
-{
-    int out = 0;
-    for (auto & [id, entity] : state.entities) {
-        if (entity.type == type) {
-            out += entity.hp;
-        }
+    int elfHp = CountEntityHitPoints(state, EntityType::Elf);
+    int goblinHp = CountEntityHitPoints(state, EntityType::Goblin);
+    if (elfHp == 0 || goblinHp == 0) {
+        return;
+    } else {
+        state.round++;
     }
-    return out;
 }
 
 int main(int argc, char ** argv)
@@ -408,21 +276,21 @@ int main(int argc, char ** argv)
         TakeTurns(map, state, disp);
 
         DrawEverything(map, state, disp);
-        std::this_thread::sleep_for(200ms);
+        // std::this_thread::sleep_for(200ms);
 
         int elfHp = CountEntityHitPoints(state, EntityType::Elf);
         int goblinHp = CountEntityHitPoints(state, EntityType::Goblin);
+        int lastFullRound = state.round-1;
         if (elfHp == 0) {
             done = true;
-            std::cout << "Goblins win! Round=" << state.round
+            std::cout << "Goblins win! Round=" << lastFullRound
                       << ", HP=" << goblinHp
-                      << ", Outcome=" << (state.round * goblinHp) << '\n';
+                      << ", Outcome=" << (lastFullRound * goblinHp) << '\n';
         } else if (goblinHp == 0) {
             done = true;
-            std::cout << "Elves win! Round=" << state.round << ", HP=" << elfHp
-                      << ", Outcome=" << (state.round * elfHp) << '\n';
-        } else {
-            state.round++;
+            std::cout << "Elves win! Round=" << lastFullRound
+                      << ", HP=" << elfHp
+                      << ", Outcome=" << (lastFullRound * elfHp) << '\n';
         }
     }
     std::cout << ansi::cup(displayEnd) << '\n';

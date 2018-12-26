@@ -39,6 +39,7 @@ using EntityId = uint32_t;
 using Round = uint32_t;
 using HitPoints = int32_t;
 using AttackPower = uint32_t;
+using Distance = uint32_t;
 
 
 template <typename Key, typename Value>
@@ -82,7 +83,7 @@ struct Coordinates
         return !(*this == other);
     }
 
-    Coordinates operator+(const Coordinates & other)
+    Coordinates operator+(const Coordinates & other) const
     {
         Coordinates out = other;
         out.x += x;
@@ -216,6 +217,172 @@ optional<EntityId> SelectAdjacentTarget(const State & state, Coordinates source,
         }
     }
     return attackThisTarget;
+}
+
+vector<Coordinates> GetAdjacentOpenSquares(const Map & map, const State & state,
+                                           Coordinates coords)
+{
+    vector<Coordinates> out;
+
+    for (Coordinates neighbor : GetAdjacentSquares(coords)) {
+        auto [x, y] = neighbor;
+        if (!map[y][x]) {
+            continue;
+        }
+        if (!Contains(state.entitiesByLocation, neighbor)) {
+            out.push_back(neighbor);
+        }
+    }
+
+    return out;
+}
+
+set<Coordinates> GetAllOpenSquares(const Map & map, const State & state)
+{
+    set<Coordinates> out;
+    for (Row y = 0; y < MapSize; y++) {
+        for (Column x = 0; x < MapSize; x++) {
+            Coordinates coords = {x, y};
+            if (map[y][x] && !Contains(state.entitiesByLocation, coords)) {
+                out.insert(coords);
+            }
+        }
+    }
+    return out;
+}
+
+struct BfsResult
+{
+    std::map<Coordinates, Distance> distances;
+    std::map<Coordinates, optional<Coordinates>> predecessors;
+};
+
+BfsResult Bfs(const Map & map, const State & state, Coordinates s)
+{
+    enum class Color
+    {
+        White,
+        Gray,
+        Black,
+    };
+
+    set<Coordinates> vertexesExcludingSource = GetAllOpenSquares(map, state);
+    set<Coordinates> vertexes = vertexesExcludingSource;
+    vertexes.insert(s);
+    std::map<Coordinates, Color> color;
+    std::map<Coordinates, Distance> d;
+    std::map<Coordinates, optional<Coordinates>> pi; // Predecessor
+    deque<Coordinates> q;
+
+    for (Coordinates u : vertexesExcludingSource) {
+        d[u] = std::numeric_limits<Distance>::max();
+        pi[u] = {};
+    }
+    color[s] = Color::Gray;
+    d[s] = 0;
+    pi[s] = {};
+    q.push_back(s);
+    while (!q.empty()) {
+        Coordinates u = q.front();
+        q.pop_front();
+        for (Coordinates v : GetAdjacentOpenSquares(map, state, u)) {
+            if (color[v] == Color::White) {
+                color[v] = Color::Gray;
+                d[v] = d[u] + 1;
+                pi[v] = u;
+                q.push_back(v);
+            }
+        }
+        color[u] = Color::Black;
+    }
+
+    BfsResult result;
+    result.distances = std::move(d);
+    result.predecessors = std::move(pi);
+    return result;
+}
+
+set<Coordinates> FindSquaresInRangeOfTargets(const Map & map,
+                                             const State & state,
+                                             const set<Coordinates> & targets)
+{
+    set<Coordinates> out;
+    for (Coordinates target : targets) {
+        for (auto neighbor : GetAdjacentOpenSquares(map, state, target)) {
+            out.insert(neighbor);
+        }
+    }
+    return out;
+}
+
+
+// Returns either the adjacent square we should move onto to reach the
+// nearest target, or {} if there are no paths to targets.
+optional<Path> SearchForTarget(const Map & map, const State & state,
+                               const Coordinates entity,
+                               const set<Coordinates> & targets)
+{
+    const BfsResult bfsToSource = Bfs(map, state, entity);
+
+    // Set will automatically be ordered in "reading order", so the first of
+    // each distance we find will be the priority.
+    const set<Coordinates> squaresInRangeOfTargets =
+        FindSquaresInRangeOfTargets(map, state, targets);
+    if (squaresInRangeOfTargets.empty()) {
+        return {};
+    }
+    Coordinates nearestDest = *squaresInRangeOfTargets.begin();
+    Distance shortestDistance = bfsToSource.distances.at(nearestDest);
+    for (Coordinates dest : squaresInRangeOfTargets) {
+        Distance distance = bfsToSource.distances.at(dest);
+        if (distance < shortestDistance) {
+            shortestDistance = distance;
+            nearestDest = dest;
+        }
+    }
+
+    // If there was no path, shortestDistance will be "infinity".
+    // XXX This is a horrible paradigm. Do something else.
+
+    if (shortestDistance == std::numeric_limits<Distance>::max()) {
+        return {};
+    }
+
+
+    BfsResult bfsToTarget = Bfs(map, state, nearestDest);
+
+    // Our current location wasn't part of the BFS, so pick our best neighbor.
+    auto openNeighbors = GetAdjacentOpenSquares(map, state, entity);
+    Coordinates bestNeighbor = *openNeighbors.begin();
+    Distance bestNeighborDistance = bfsToTarget.distances.at(bestNeighbor);
+    for (auto neighbor : openNeighbors) {
+        auto distance = bfsToTarget.distances.at(neighbor);
+        if (distance < bestNeighborDistance) {
+            bestNeighborDistance = distance;
+            bestNeighbor = neighbor;
+        }
+    }
+
+    Path out;
+    Coordinates next = bestNeighbor;
+    out.push_back(next);
+    while (next != nearestDest) {
+        next = *bfsToTarget.predecessors.at(next);
+        out.push_back(next);
+    }
+
+    return out;
+}
+
+set<Coordinates> GetTargets(const State & state, EntityType targetType)
+{
+    set<Coordinates> out;
+    for (auto & [id, entity] : state.entities) {
+        if (entity.type == targetType && entity.hp > 0) {
+            out.insert(entity.coords);
+        }
+    }
+    return out;
 }
 
 } // namespace day15
